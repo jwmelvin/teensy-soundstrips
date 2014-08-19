@@ -6,12 +6,12 @@
 #include <Encoder.h>
 #include <Bounce.h>
 
-#define debug true
+#define debug false
 
 #define nLEDs 44
 #define nBINS 22
 
-#define encCHUNK 1
+#define encCHUNK 2
 #define milBUTTON_HOLD 800
 
 #define pinEncA 15
@@ -22,13 +22,13 @@
 #define pinCLK 13
 
 boolean modeMAX = true;
-#define MAX_FADE 12
+#define FADE_RATE 12
 
 #define PEAK_ALL false
 #define PEAK_BASS true
-#define SCALE_PEAK 32767
 int scalePeak = 0;
 #define MIN_BRIGHT 10
+#define MAX_BRIGHT 255
 
 uint8_t brightness = 32;
 
@@ -104,8 +104,8 @@ void loop() {
 			if (val[i] >= maximum[i]) {
 				maximum[i] = val[i];
 			} else {
-				if (maximum[i] > 0 && maximum[i] > MAX_FADE)
-					maximum[i] = maximum[i] - MAX_FADE;
+				if (maximum[i] > 0 && maximum[i] > FADE_RATE)
+					maximum[i] = maximum[i] - FADE_RATE;
 				else
 					maximum[i] = 0;
      	 	}
@@ -139,8 +139,7 @@ void loop() {
 				Serial.print(sum[1]);Serial.print("/");Serial.print(scalePeak);
 				Serial.print("=");Serial.println(monoPeak);
 			}
-		}		
-		
+		}
 		updateStrip();
 	}
 }
@@ -164,26 +163,18 @@ void updateStrip(){
 	strip.show();
 }
 
-int maxVal(){
-	int temp;
-	for (int i = 0; i<nBINS; i++){
-		if (val[i]  > temp) temp = val[i];
-	}
-	return temp;
-}
-
 void inputEncoder() {
 	int32_t encNew = enc.read();
 	int32_t encChange = encNew - encOld;
 	if ( abs(encChange) >= encCHUNK ) {
 		encOld = encNew;
 		//milTimeout = millis();
-		encChange /= encCHUNK; // use chunks to ensure fine control (move by a single index)
+		encChange /= encCHUNK; // use chunks to ensure fine control 
 		if ( encChange > 0) { // increased
-			brightness++;
+			brightness = constrain(brightness+1, MIN_BRIGHT, MAX_BRIGHT);
 		}
 		else { // decreased
-			brightness--;
+			brightness = constrain(brightness-1, MIN_BRIGHT, MAX_BRIGHT);
 		}
 	}
 }
@@ -240,9 +231,7 @@ uint32_t Wheel(uint16_t WheelPos)
 
 // dimming function for LPD8806 LED strips
 void dimPixel(uint16_t pos, uint8_t intensity){ // intensity = 0-127
-	
 	uint32_t colorOld = strip.getPixelColor(pos);
-	
 	strip.setPixelColor(pos, (
 						 (((colorOld >> 16) & 0x7f) * intensity / 127) << 16 |
 						 (((colorOld >>  8) & 0x7f) * intensity / 127) <<  8 |
