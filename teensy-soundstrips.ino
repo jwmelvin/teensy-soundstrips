@@ -24,7 +24,13 @@
 boolean modeMAX = true;
 #define MAX_FADE 12
 
-uint8_t brightness = 16;
+#define PEAK_ALL false
+#define PEAK_BASS true
+#define SCALE_PEAK 32767
+int scalePeak = 0;
+#define MIN_BRIGHT 10
+
+uint8_t brightness = 32;
 
 Encoder enc(pinEncA, pinEncB);
 int32_t encOld = -999;
@@ -34,12 +40,14 @@ uint32_t milTimeout;
 
 AudioInputAnalog        audioInput(A9);
 AudioPeak               peak_M;
+float monoPeak;
 AudioAnalyzeFFT256	myFFT(11);
 AudioMixer4			mix1;
 
 AudioConnection c1(audioInput, 0, mix1, 0);
-//AudioConnection c2(mix1, 0, peak_M, 0);
+AudioConnection c2(mix1, 0, peak_M, 0);
 AudioConnection c3(mix1, 0, myFFT, 0);
+
 
 LPD8806 strip = LPD8806(nLEDs);
 
@@ -77,13 +85,17 @@ void loop() {
 		for (int i=0; i<128; i++) {
 			sum[n] = sum[n] + myFFT.output[i];
 			count++;
-		      if (count >= nsum[n]) {
+			if (count >= nsum[n]) {
 				n++;
 				if (n >= nBINS) break;
 				count = 0;
 			}
 		}
-		scale = maxSum();
+		// determine scale based on largest sum
+		scale = 0;
+		for (int i = 0; i<nBINS; i++){
+			if (sum[i]  > scale) scale = sum[i];
+		}
 		
 		for (int i=0; i<nBINS; i++) {
 			val[i] = 384 * sum[i] / scale;
@@ -97,17 +109,38 @@ void loop() {
 				else
 					maximum[i] = 0;
      	 	}
-
+			
 			if (debug){
-				Serial.print("scale="); Serial.print(scale); Serial.print(" ");
+				Serial.print("sum:val[");Serial.print(i);Serial.print("]=");
 				Serial.print(sum[i]);
-				Serial.print("=");
+				Serial.print(":");
 				Serial.print(val[i]);
 				Serial.print(",");
 			}
 		}
-		Serial.println();
+		if(debug) Serial.println();
 		count = 0;
+		// measure peak
+		if (PEAK_ALL) {
+			if (peak_M.Dpp() > scalePeak) scalePeak = peak_M.Dpp();
+			monoPeak=float(peak_M.Dpp())/float(scalePeak);
+			peak_M.begin();
+			if(debug){
+				Serial.print("peak/scale:"); 
+				Serial.print(peak_M.Dpp());Serial.print("/");Serial.print(scalePeak);
+				Serial.print("=");Serial.println(monoPeak);
+			}
+		} else if (PEAK_BASS) {
+			if (sum[1] > scalePeak) scalePeak = sum[1];
+			else scalePeak--;
+			monoPeak = float(sum[1])/float(scalePeak);
+			if(debug){
+				Serial.print("peak/scale:"); 
+				Serial.print(sum[1]);Serial.print("/");Serial.print(scalePeak);
+				Serial.print("=");Serial.println(monoPeak);
+			}
+		}		
+		
 		updateStrip();
 	}
 }
@@ -126,7 +159,7 @@ void updateStrip(){
 			strip.setPixelColor(i,Wheel(val[nBINS*2 - i - 1]));
 	}
 	for (int i=0; i<nLEDs; i++){
-		dimPixel(i, brightness);
+		dimPixel(i, constrain(monoPeak * brightness, MIN_BRIGHT, monoPeak * brightness));
 	}
 	strip.show();
 }
@@ -136,19 +169,6 @@ int maxVal(){
 	for (int i = 0; i<nBINS; i++){
 		if (val[i]  > temp) temp = val[i];
 	}
-	return temp;
-}
-
-int maxSum(){
-	int temp;
-	for (int i = 0; i<nBINS; i++){
-		if (sum[i]  > temp) temp = sum[i];
-		if(debug){
-			Serial.print(" sum[");Serial.print(i);Serial.print("]");Serial.print(sum[i]);
-			Serial.print(" temp=");Serial.print(temp);
-		}
-	}
-	if(debug) {Serial.println();Serial.print("max=");Serial.println(temp);}
 	return temp;
 }
 
@@ -218,6 +238,7 @@ uint32_t Wheel(uint16_t WheelPos)
   return(strip.Color(r,g,b));
 }
 
+// dimming function for LPD8806 LED strips
 void dimPixel(uint16_t pos, uint8_t intensity){ // intensity = 0-127
 	
 	uint32_t colorOld = strip.getPixelColor(pos);
